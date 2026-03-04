@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Strava: Post-ride carbs (<10 min)
-// @namespace    aasa
+// @namespace    https://github.com/martinaasa/strava-carb-calculator
 // @version      1.2.0
-// @description  Shows immediate carb recommendation based on Moving Time, TSS and Weight (g/kg lookup). Rendered as a new row under Sauce stats. Optimized to avoid Strava lag.
 // @match        https://www.strava.com/activities/*
-// @grant        GM_addStyle
+// @downloadURL  https://raw.githubusercontent.com/martinaasa/strava-carb-calculator/main/strava-carb-calculator.user.js
+// @updateURL    https://raw.githubusercontent.com/martinaasa/strava-carb-calculator/main/strava-carb-calculator.user.js
 // ==/UserScript==
 
 (() => {
