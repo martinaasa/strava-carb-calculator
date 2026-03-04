@@ -1,5 +1,7 @@
 # Strava Post-Ride Carb Calculator
 
+[![Install userscript](https://img.shields.io/badge/install-userscript-brightgreen)](https://raw.githubusercontent.com/martinaasa/strava-carb-calculator/main/strava-carb-calculator.user.js)
+
 A small userscript that adds an **immediate post-ride carbohydrate recommendation** directly to the Strava activity page.
 
 It reads the following values from the page (via the **Strava Sauce** extension):
