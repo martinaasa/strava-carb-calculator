@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Strava: Post-ride carbs (<10 min)
 // @namespace    https://github.com/martinaasa/strava-carb-calculator
-// @version      1.4.1
+// @version      1.5.0
 // @description  Adds an immediate post-ride carb recommendation under Strava Sauce stats (Moving Time + TSS + Weight).
 // @match        https://www.strava.com/activities/*
 // @run-at       document-idle
@@ -15,59 +15,24 @@
   function addStyle(css) {
     const el = document.createElement("style");
     el.textContent = css;
-    (document.head || document.documentElement).appendChild(el);
+    document.head.appendChild(el);
   }
 
-  // Strava-ish styling: emphasize carbs, keep meta subdued.
   addStyle(`
-    .carbcalc-wrap { margin-top: 0; padding-top: 0; }
-
     .carbcalc-row {
-      display: flex;
-      align-items: baseline;
-      gap: 14px;
-      padding-top: 10px;
-      margin-top: 8px;
+      margin-top: 6px;
+      padding-top: 6px;
       border-top: 1px solid rgba(0,0,0,0.08);
+      font-size: 12px;
+      line-height: 1.4;
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
       flex-wrap: wrap;
     }
-
-    .carbcalc-stat {
-      display: inline-block;
-      min-width: 190px;
-    }
-
-    .carbcalc-stat strong {
-      font-weight: 600;
-      font-size: 22px;
-      line-height: 1.1;
-      letter-spacing: -0.01em;
-    }
-
-    .carbcalc-stat .unit {
-      font-size: 14px;
-      font-weight: 500;
-      opacity: 0.9;
-      margin-left: 4px;
-    }
-
-    .carbcalc-stat .label {
-      margin-top: 4px;
-      font-size: 12px;
-      opacity: 0.65;
-      line-height: 1.2;
-    }
-
-    .carbcalc-meta {
-      font-size: 12px;
-      opacity: 0.7;
-      white-space: nowrap;
-    }
-
-    .carbcalc-missing strong {
-      font-size: 16px;
-      opacity: 0.7;
-    }
+    .carbcalc-row .carbcalc-title { font-weight: 600; opacity: 0.85; }
+    .carbcalc-row .carbcalc-value { font-weight: 600; }
+    .carbcalc-row .carbcalc-meta  { opacity: 0.75; white-space: nowrap; }
   `);
 
   // ---- Lookup table: duration bucket + TSS/h -> g/kg range ----
@@ -133,7 +98,6 @@
     return TABLE.find(r => r.dur === dur && tssPerHour >= r.tMin && tssPerHour <= r.tMax) || null;
   }
 
-  // ---- DOM readers (match your HTML) ----
   function findMovingTimeText() {
     const lis = document.querySelectorAll("ul.inline-stats.section > li");
     for (const li of lis) {
@@ -153,55 +117,32 @@
     return parseNumber(a?.innerText?.trim());
   }
 
-  function carbRowExists() {
-    return !!document.querySelector(".carbcalc-wrap");
-  }
-
-  // ---- Injection ----
-  function ensureCarbNode() {
+  function ensureCarbRowNode() {
     const ul = document.querySelector("ul.inline-stats.section.secondary-stats.sauce-stats");
     if (!ul) return null;
 
     const parent = ul.parentElement || ul;
+    let row = parent.querySelector(":scope > .carbcalc-row");
+    if (row) return row;
 
-    let wrap = parent.querySelector(":scope > .carbcalc-wrap");
-    if (wrap) return wrap;
-
-    wrap = document.createElement("div");
-    wrap.className = "carbcalc-wrap";
-    wrap.innerHTML = `
-      <div class="carbcalc-row">
-        <div class="carbcalc-stat">
-          <strong class="carbcalc-value">–</strong><span class="unit">g</span>
-          <div class="label">Carbs (&lt;10 min)</div>
-        </div>
-        <div class="carbcalc-meta carbcalc-meta-text"></div>
-      </div>
+    row = document.createElement("div");
+    row.className = "carbcalc-row";
+    row.innerHTML = `
+      <span class="carbcalc-title">Carbs (&lt;10 min)</span>
+      <span class="carbcalc-value">–</span>
+      <span class="carbcalc-meta"></span>
     `;
 
-    ul.insertAdjacentElement("afterend", wrap);
-    return wrap;
-  }
-
-  function setMissing(wrap, missing) {
-    const valueEl = wrap.querySelector(".carbcalc-value");
-    const unitEl = wrap.querySelector(".unit");
-    const metaEl = wrap.querySelector(".carbcalc-meta-text");
-
-    valueEl.textContent = "–";
-    unitEl.textContent = "";
-    wrap.querySelector(".carbcalc-stat").classList.add("carbcalc-missing");
-    metaEl.textContent = `Missing: ${missing.join(", ")}`;
+    ul.insertAdjacentElement("afterend", row);
+    return row;
   }
 
   function render() {
-    const wrap = ensureCarbNode();
-    if (!wrap) return;
+    const row = ensureCarbRowNode();
+    if (!row) return;
 
-    const valueEl = wrap.querySelector(".carbcalc-value");
-    const unitEl = wrap.querySelector(".unit");
-    const metaEl = wrap.querySelector(".carbcalc-meta-text");
-    wrap.querySelector(".carbcalc-stat").classList.remove("carbcalc-missing");
+    const valueEl = row.querySelector(".carbcalc-value");
+    const metaEl = row.querySelector(".carbcalc-meta");
 
     const timeText = findMovingTimeText();
     const minutes = parseTimeToMinutes(timeText);
@@ -214,7 +155,8 @@
     if (weight === null) missing.push("Weight");
 
     if (missing.length) {
-      setMissing(wrap, missing);
+      valueEl.textContent = "–";
+      metaEl.textContent = `Missing: ${missing.join(", ")}`;
       return;
     }
 
@@ -223,7 +165,6 @@
 
     if (!rowMatch) {
       valueEl.textContent = "–";
-      unitEl.textContent = "";
       metaEl.textContent = `No match (dur ${durationBucket(minutes)}, TSS/h ${tssPerHour.toFixed(1)})`;
       return;
     }
@@ -231,8 +172,7 @@
     const gramsMin = Math.round(rowMatch.gMin * weight);
     const gramsMax = Math.round(rowMatch.gMax * weight);
 
-    valueEl.textContent = `${gramsMin}${gramsMin !== gramsMax ? `–${gramsMax}` : ""}`;
-    unitEl.textContent = "g";
+    valueEl.textContent = `${gramsMin}${gramsMin !== gramsMax ? `–${gramsMax}` : ""} g`;
     metaEl.textContent = `TSS/h ${tssPerHour.toFixed(1)} | ${rowMatch.gMin.toFixed(1)}–${rowMatch.gMax.toFixed(1)} g/kg`;
   }
 
@@ -257,9 +197,7 @@
       String(findWeightKg() ?? "")
     ].join("|");
 
-    // If our injected node got removed by a re-render, force re-inject
-    if (key === lastKey && carbRowExists()) return;
-
+    if (key === lastKey) return;
     lastKey = key;
     render();
   }
@@ -275,6 +213,7 @@
     return obs;
   }
 
+  // Detect SPA navigation by polling path (cheap and reliable)
   function pollPath() {
     if (location.pathname !== lastPath) {
       lastPath = location.pathname;
