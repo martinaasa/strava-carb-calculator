@@ -1,49 +1,24 @@
 // ==UserScript==
 // @name         Strava: Post-ride carbs (<10 min)
 // @namespace    https://github.com/martinaasa/strava-carb-calculator
-// @version      1.2.0
+// @version      1.3.1
+// @description  Adds an immediate post-ride carb recommendation under Strava Sauce stats (Moving Time + TSS + Weight).
 // @match        https://www.strava.com/activities/*
-// @downloadURL  https://raw.githubusercontent.com/martinaasa/strava-carb-calculator/main/strava-carb-calculator.user.js
-// @updateURL    https://raw.githubusercontent.com/martinaasa/strava-carb-calculator/main/strava-carb-calculator.user.js
+// @run-at       document-idle
+// @grant        none
 // ==/UserScript==
 
 (() => {
   "use strict";
 
-  // ---- Lookup table: duration bucket + TSS/h -> g/kg range ----
-  const TABLE = [
-    { dur: "<=45",    tMin: 0,  tMax: 50,        gMin: 0.3, gMax: 0.4 },
-    { dur: "<=45",    tMin: 50, tMax: 60,        gMin: 0.4, gMax: 0.5 },
-    { dur: "<=45",    tMin: 61, tMax: 72,        gMin: 0.5, gMax: 0.6 },
-    { dur: "<=45",    tMin: 73, tMax: Infinity,  gMin: 0.5, gMax: 0.7 },
+  // ---- CSS injection (no GM_addStyle) ----
+  function addStyle(css) {
+    const el = document.createElement("style");
+    el.textContent = css;
+    document.head.appendChild(el);
+  }
 
-    { dur: "46-75",   tMin: 0,  tMax: 50,        gMin: 0.3, gMax: 0.4 },
-    { dur: "46-75",   tMin: 50, tMax: 60,        gMin: 0.4, gMax: 0.5 },
-    { dur: "46-75",   tMin: 61, tMax: 72,        gMin: 0.5, gMax: 0.6 },
-    { dur: "46-75",   tMin: 73, tMax: Infinity,  gMin: 0.6, gMax: 0.7 },
-
-    { dur: "76-120",  tMin: 0,  tMax: 50,        gMin: 0.4, gMax: 0.5 },
-    { dur: "76-120",  tMin: 50, tMax: 60,        gMin: 0.5, gMax: 0.6 },
-    { dur: "76-120",  tMin: 61, tMax: 72,        gMin: 0.6, gMax: 0.7 },
-    { dur: "76-120",  tMin: 73, tMax: Infinity,  gMin: 0.7, gMax: 0.8 },
-
-    { dur: "121-180", tMin: 0,  tMax: 50,        gMin: 0.8, gMax: 0.9 },
-    { dur: "121-180", tMin: 50, tMax: 60,        gMin: 0.9, gMax: 1.0 },
-    { dur: "121-180", tMin: 61, tMax: 72,        gMin: 1.0, gMax: 1.1 },
-    { dur: "121-180", tMin: 73, tMax: Infinity,  gMin: 1.1, gMax: 1.2 },
-
-    { dur: "181-240", tMin: 0,  tMax: 50,        gMin: 0.8, gMax: 0.9 },
-    { dur: "181-240", tMin: 50, tMax: 60,        gMin: 1.0, gMax: 1.1 },
-    { dur: "181-240", tMin: 61, tMax: 72,        gMin: 1.1, gMax: 1.2 },
-    { dur: "181-240", tMin: 73, tMax: Infinity,  gMin: 1.2, gMax: 1.2 },
-
-    { dur: ">240",    tMin: 0,  tMax: 50,        gMin: 0.8, gMax: 0.9 },
-    { dur: ">240",    tMin: 50, tMax: 60,        gMin: 1.0, gMax: 1.1 },
-    { dur: ">240",    tMin: 61, tMax: 72,        gMin: 1.1, gMax: 1.2 },
-    { dur: ">240",    tMin: 73, tMax: Infinity,  gMin: 1.2, gMax: 1.2 },
-  ];
-
-  GM_addStyle(`
+  addStyle(`
     .carbcalc-row {
       margin-top: 6px;
       padding-top: 6px;
@@ -60,7 +35,39 @@
     .carbcalc-row .carbcalc-meta  { opacity: 0.75; white-space: nowrap; }
   `);
 
-  // ---- helpers ----
+  // ---- Lookup table: duration bucket + TSS/h -> g/kg range ----
+  const TABLE = [
+    { dur: "<=45",    tMin: 0,  tMax: 50,       gMin: 0.3, gMax: 0.4 },
+    { dur: "<=45",    tMin: 50, tMax: 60,       gMin: 0.4, gMax: 0.5 },
+    { dur: "<=45",    tMin: 61, tMax: 72,       gMin: 0.5, gMax: 0.6 },
+    { dur: "<=45",    tMin: 73, tMax: Infinity, gMin: 0.5, gMax: 0.7 },
+
+    { dur: "46-75",   tMin: 0,  tMax: 50,       gMin: 0.3, gMax: 0.4 },
+    { dur: "46-75",   tMin: 50, tMax: 60,       gMin: 0.4, gMax: 0.5 },
+    { dur: "46-75",   tMin: 61, tMax: 72,       gMin: 0.5, gMax: 0.6 },
+    { dur: "46-75",   tMin: 73, tMax: Infinity, gMin: 0.6, gMax: 0.7 },
+
+    { dur: "76-120",  tMin: 0,  tMax: 50,       gMin: 0.4, gMax: 0.5 },
+    { dur: "76-120",  tMin: 50, tMax: 60,       gMin: 0.5, gMax: 0.6 },
+    { dur: "76-120",  tMin: 61, tMax: 72,       gMin: 0.6, gMax: 0.7 },
+    { dur: "76-120",  tMin: 73, tMax: Infinity, gMin: 0.7, gMax: 0.8 },
+
+    { dur: "121-180", tMin: 0,  tMax: 50,       gMin: 0.8, gMax: 0.9 },
+    { dur: "121-180", tMin: 50, tMax: 60,       gMin: 0.9, gMax: 1.0 },
+    { dur: "121-180", tMin: 61, tMax: 72,       gMin: 1.0, gMax: 1.1 },
+    { dur: "121-180", tMin: 73, tMax: Infinity, gMin: 1.1, gMax: 1.2 },
+
+    { dur: "181-240", tMin: 0,  tMax: 50,       gMin: 0.8, gMax: 0.9 },
+    { dur: "181-240", tMin: 50, tMax: 60,       gMin: 1.0, gMax: 1.1 },
+    { dur: "181-240", tMin: 61, tMax: 72,       gMin: 1.1, gMax: 1.2 },
+    { dur: "181-240", tMin: 73, tMax: Infinity, gMin: 1.2, gMax: 1.2 },
+
+    { dur: ">240",    tMin: 0,  tMax: 50,       gMin: 0.8, gMax: 0.9 },
+    { dur: ">240",    tMin: 50, tMax: 60,       gMin: 1.0, gMax: 1.1 },
+    { dur: ">240",    tMin: 61, tMax: 72,       gMin: 1.1, gMax: 1.2 },
+    { dur: ">240",    tMin: 73, tMax: Infinity, gMin: 1.2, gMax: 1.2 },
+  ];
+
   function parseNumber(text) {
     if (!text) return null;
     const cleaned = text.replace(/\s/g, "").replace(/,/g, "");
@@ -91,32 +98,31 @@
     return TABLE.find(r => r.dur === dur && tssPerHour >= r.tMin && tssPerHour <= r.tMax) || null;
   }
 
-  // ---- DOM readers (based on your HTML snippet) ----
   function findMovingTimeText() {
     const lis = document.querySelectorAll("ul.inline-stats.section > li");
     for (const li of lis) {
-      const label = li.querySelector(".label")?.innerText?.trim();
-      if (label === "Moving Time") return li.querySelector("strong")?.innerText?.trim() || null;
+      const labelText = li.querySelector(".label")?.innerText?.replace(/\s+/g, " ")?.trim();
+      if (labelText === "Moving Time") return li.querySelector("strong")?.innerText?.trim() || null;
     }
     return null;
   }
 
   function findTss() {
-    const strong = document.querySelector('li[title*="Training Stress Score"] strong');
+    const strong = document.querySelector('ul.sauce-stats li[title*="Training Stress Score"] strong');
     return parseNumber(strong?.innerText?.trim());
   }
 
   function findWeightKg() {
-    const a = document.querySelector("strong.sauce-editable-field.weight a.origin-strava");
+    const a = document.querySelector("ul.sauce-stats strong.sauce-editable-field.weight a.origin-strava");
     return parseNumber(a?.innerText?.trim());
   }
 
-  // ---- Injection: create a separate row under sauce stats ----
   function ensureCarbRowNode() {
     const ul = document.querySelector("ul.inline-stats.section.secondary-stats.sauce-stats");
     if (!ul) return null;
 
-    let row = ul.parentElement.querySelector(".carbcalc-row");
+    const parent = ul.parentElement || ul;
+    let row = parent.querySelector(":scope > .carbcalc-row");
     if (row) return row;
 
     row = document.createElement("div");
@@ -170,9 +176,10 @@
     metaEl.textContent = `TSS/h ${tssPerHour.toFixed(1)} | ${rowMatch.gMin.toFixed(1)}–${rowMatch.gMax.toFixed(1)} g/kg`;
   }
 
-  // ---- Performance-safe rerendering ----
+  // ---- Debounced rerender + SPA URL change detection ----
   let lastKey = "";
   let timer = null;
+  let lastPath = location.pathname;
 
   function scheduleRender() {
     if (timer) return;
@@ -183,37 +190,40 @@
   }
 
   function safeRender() {
-    const timeText = findMovingTimeText() || "";
-    const tss = findTss();
-    const weight = findWeightKg();
-    const key = `${timeText}|${tss ?? ""}|${weight ?? ""}`;
+    const key = [
+      location.pathname,
+      findMovingTimeText() || "",
+      String(findTss() ?? ""),
+      String(findWeightKg() ?? "")
+    ].join("|");
+
     if (key === lastKey) return;
     lastKey = key;
     render();
   }
 
-  function start() {
-    safeRender();
-
-    // Observe only the relevant stats container
+  function attachObserver() {
     const target =
       document.querySelector("ul.inline-stats.section.secondary-stats.sauce-stats") ||
       document.querySelector("ul.inline-stats.section") ||
-      document.querySelector(".activity-summary") ||
       document.body;
 
     const obs = new MutationObserver(() => scheduleRender());
     obs.observe(target, { childList: true, subtree: true });
-
-    window.addEventListener("load", () => scheduleRender(), { once: true });
+    return obs;
   }
 
-  // Wait for Strava/Sauce DOM
-  (function ready() {
-    const hasTime = document.querySelector("ul.inline-stats.section");
-    const hasSauce = document.querySelector('li[title*="Training Stress Score"]');
-    if (hasTime && hasSauce) start();
-    else setTimeout(ready, 400);
-  })();
+  // Detect SPA navigation by polling path (cheap and reliable)
+  function pollPath() {
+    if (location.pathname !== lastPath) {
+      lastPath = location.pathname;
+      lastKey = "";
+      scheduleRender();
+    }
+  }
 
+  // Start
+  safeRender();
+  attachObserver();
+  setInterval(pollPath, 500);
 })();
