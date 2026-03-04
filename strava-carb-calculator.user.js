@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Strava: Post-ride carbs (<10 min)
 // @namespace    https://github.com/martinaasa/strava-carb-calculator
-// @version      1.5.0
-// @description  Adds an immediate post-ride carb recommendation under Strava Sauce stats (Moving Time + TSS + Weight). SPA-robust.
+// @version      1.3.2
+// @description  Adds a post-ride carb recommendation under Strava Sauce stats (simple + fast).
 // @match        https://www.strava.com/activities/*
 // @run-at       document-idle
 // @grant        none
@@ -11,59 +11,7 @@
 (() => {
   "use strict";
 
-  // ---------- Style ----------
-  function addStyle(css) {
-    const el = document.createElement("style");
-    el.textContent = css;
-    (document.head || document.documentElement).appendChild(el);
-  }
-
-  addStyle(`
-    .carbcalc-wrap { margin-top: 0; padding-top: 0; }
-
-    .carbcalc-row {
-      display: flex;
-      align-items: baseline;
-      gap: 14px;
-      padding-top: 10px;
-      margin-top: 8px;
-      border-top: 1px solid rgba(0,0,0,0.08);
-      flex-wrap: wrap;
-    }
-
-    .carbcalc-stat { display: inline-block; min-width: 190px; }
-
-    .carbcalc-stat strong {
-      font-weight: 600;
-      font-size: 22px;
-      line-height: 1.1;
-      letter-spacing: -0.01em;
-    }
-
-    .carbcalc-stat .unit {
-      font-size: 14px;
-      font-weight: 500;
-      opacity: 0.9;
-      margin-left: 4px;
-    }
-
-    .carbcalc-stat .label {
-      margin-top: 4px;
-      font-size: 12px;
-      opacity: 0.65;
-      line-height: 1.2;
-    }
-
-    .carbcalc-meta {
-      font-size: 12px;
-      opacity: 0.7;
-      white-space: nowrap;
-    }
-
-    .carbcalc-missing strong { font-size: 16px; opacity: 0.7; }
-  `);
-
-  // ---------- Lookup ----------
+  // ---- Simple lookup table: duration bucket + TSS/h -> g/kg range ----
   const TABLE = [
     { dur: "<=45",    tMin: 0,  tMax: 50,       gMin: 0.3, gMax: 0.4 },
     { dur: "<=45",    tMin: 50, tMax: 60,       gMin: 0.4, gMax: 0.5 },
@@ -96,7 +44,6 @@
     { dur: ">240",    tMin: 73, tMax: Infinity, gMin: 1.2, gMax: 1.2 },
   ];
 
-  // ---------- Helpers ----------
   function parseNumber(text) {
     if (!text) return null;
     const cleaned = text.replace(/\s/g, "").replace(/,/g, "");
@@ -127,7 +74,7 @@
     return TABLE.find(r => r.dur === dur && tssPerHour >= r.tMin && tssPerHour <= r.tMax) || null;
   }
 
-  // ---------- DOM readers ----------
+  // --- Read values from the DOM (matches your HTML) ---
   function findMovingTimeText() {
     const lis = document.querySelectorAll("ul.inline-stats.section > li");
     for (const li of lis) {
@@ -147,154 +94,83 @@
     return parseNumber(a?.innerText?.trim());
   }
 
-  function findSauceStatsUl() {
-    return document.querySelector("ul.inline-stats.section.secondary-stats.sauce-stats");
-  }
-
-  function carbWrapExistsFor(ul) {
-    if (!ul) return false;
-    const parent = ul.parentElement || ul;
-    return !!parent.querySelector(":scope > .carbcalc-wrap");
-  }
-
-  // ---------- Injection ----------
-  function ensureCarbNode(ul) {
+  // --- Minimal UI injection: one line under sauce stats ---
+  function ensureRow() {
+    const ul = document.querySelector("ul.inline-stats.section.secondary-stats.sauce-stats");
     if (!ul) return null;
-    const parent = ul.parentElement || ul;
 
-    let wrap = parent.querySelector(":scope > .carbcalc-wrap");
-    if (wrap) return wrap;
+    let row = ul.parentElement.querySelector(".carbcalc-row");
+    if (row) return row;
 
-    wrap = document.createElement("div");
-    wrap.className = "carbcalc-wrap";
-    wrap.innerHTML = `
-      <div class="carbcalc-row">
-        <div class="carbcalc-stat">
-          <strong class="carbcalc-value">–</strong><span class="unit">g</span>
-          <div class="label">Carbs (&lt;10 min)</div>
-        </div>
-        <div class="carbcalc-meta carbcalc-meta-text"></div>
-      </div>
+    row = document.createElement("div");
+    row.className = "carbcalc-row";
+    row.style.marginTop = "6px";
+    row.style.paddingTop = "6px";
+    row.style.borderTop = "1px solid rgba(0,0,0,0.08)";
+    row.style.fontSize = "12px";
+    row.style.opacity = "0.9";
+    row.style.display = "flex";
+    row.style.gap = "12px";
+    row.style.flexWrap = "wrap";
+
+    row.innerHTML = `
+      <span><strong>Carbs (&lt;10 min)</strong>: <span class="carbcalc-value">–</span></span>
+      <span class="carbcalc-meta" style="opacity:0.75"></span>
     `;
-    ul.insertAdjacentElement("afterend", wrap);
-    return wrap;
+
+    ul.insertAdjacentElement("afterend", row);
+    return row;
   }
 
-  function setMissing(wrap, missing) {
-    const valueEl = wrap.querySelector(".carbcalc-value");
-    const unitEl = wrap.querySelector(".unit");
-    const metaEl = wrap.querySelector(".carbcalc-meta-text");
-    valueEl.textContent = "–";
-    unitEl.textContent = "";
-    wrap.querySelector(".carbcalc-stat").classList.add("carbcalc-missing");
-    metaEl.textContent = `Missing: ${missing.join(", ")}`;
-  }
+  function renderOnce() {
+    const row = ensureRow();
+    if (!row) return false;
 
-  function render() {
-    const ul = findSauceStatsUl();
-    if (!ul) return;
+    const valueEl = row.querySelector(".carbcalc-value");
+    const metaEl = row.querySelector(".carbcalc-meta");
 
-    const wrap = ensureCarbNode(ul);
-    if (!wrap) return;
-
-    const valueEl = wrap.querySelector(".carbcalc-value");
-    const unitEl = wrap.querySelector(".unit");
-    const metaEl = wrap.querySelector(".carbcalc-meta-text");
-    wrap.querySelector(".carbcalc-stat").classList.remove("carbcalc-missing");
-
-    const timeText = findMovingTimeText();
-    const minutes = parseTimeToMinutes(timeText);
+    const minutes = parseTimeToMinutes(findMovingTimeText());
     const tss = findTss();
     const weight = findWeightKg();
 
-    const missing = [];
-    if (!minutes) missing.push("Moving Time");
-    if (tss === null) missing.push("TSS");
-    if (weight === null) missing.push("Weight");
-
-    if (missing.length) {
-      setMissing(wrap, missing);
-      return;
+    if (!minutes || tss === null || weight === null) {
+      valueEl.textContent = "–";
+      const missing = [
+        !minutes ? "Moving Time" : null,
+        tss === null ? "TSS" : null,
+        weight === null ? "Weight" : null
+      ].filter(Boolean);
+      metaEl.textContent = `Missing: ${missing.join(", ")}`;
+      return true;
     }
 
     const tssPerHour = tss / (minutes / 60);
-    const rowMatch = lookup(minutes, tssPerHour);
+    const match = lookup(minutes, tssPerHour);
 
-    if (!rowMatch) {
+    if (!match) {
       valueEl.textContent = "–";
-      unitEl.textContent = "";
       metaEl.textContent = `No match (dur ${durationBucket(minutes)}, TSS/h ${tssPerHour.toFixed(1)})`;
-      return;
+      return true;
     }
 
-    const gramsMin = Math.round(rowMatch.gMin * weight);
-    const gramsMax = Math.round(rowMatch.gMax * weight);
+    const gramsMin = Math.round(match.gMin * weight);
+    const gramsMax = Math.round(match.gMax * weight);
 
-    valueEl.textContent = `${gramsMin}${gramsMin !== gramsMax ? `–${gramsMax}` : ""}`;
-    unitEl.textContent = "g";
-    metaEl.textContent = `TSS/h ${tssPerHour.toFixed(1)} | ${rowMatch.gMin.toFixed(1)}–${rowMatch.gMax.toFixed(1)} g/kg`;
+    valueEl.textContent = `${gramsMin}${gramsMin !== gramsMax ? `–${gramsMax}` : ""} g`;
+    metaEl.textContent = `TSS/h ${tssPerHour.toFixed(1)} | ${match.gMin.toFixed(1)}–${match.gMax.toFixed(1)} g/kg`;
+
+    return true;
   }
 
-  // ---------- Scheduling & SPA hooks ----------
-  let lastFingerprint = "";
-  let debounceTimer = null;
-
-  function fingerprint() {
-    // includes whether our wrap exists (critical when DOM is rebuilt without value changes)
-    const ul = findSauceStatsUl();
-    const hasWrap = carbWrapExistsFor(ul) ? "1" : "0";
-    return [
-      location.pathname,
-      hasWrap,
-      findMovingTimeText() || "",
-      String(findTss() ?? ""),
-      String(findWeightKg() ?? "")
-    ].join("|");
-  }
-
-  function scheduleRender() {
-    if (debounceTimer) return;
-    debounceTimer = setTimeout(() => {
-      debounceTimer = null;
-      const fp = fingerprint();
-      if (fp === lastFingerprint) return;
-      lastFingerprint = fp;
-      render();
-    }, 200);
-  }
-
-  function hookHistory() {
-    const origPush = history.pushState;
-    const origReplace = history.replaceState;
-
-    history.pushState = function () {
-      const r = origPush.apply(this, arguments);
-      scheduleRender();
-      return r;
-    };
-    history.replaceState = function () {
-      const r = origReplace.apply(this, arguments);
-      scheduleRender();
-      return r;
-    };
-    window.addEventListener("popstate", scheduleRender);
-  }
-
-  function startObservers() {
-    // Observe body but debounced to avoid lag
-    const obs = new MutationObserver(() => scheduleRender());
-    obs.observe(document.body, { childList: true, subtree: true });
-    return obs;
-  }
-
-  // Watchdog: force a re-check periodically (cheap)
-  function startWatchdog() {
-    return setInterval(() => scheduleRender(), 2000);
-  }
-
-  // ---------- Start ----------
-  hookHistory();
-  startObservers();
-  startWatchdog();
-  scheduleRender();
+  // Very simple + very safe: just try a few times after load.
+  // No observers, no SPA hooks, no polling forever => no page hangs.
+  let tries = 0;
+  const maxTries = 20; // ~10 seconds
+  const timer = setInterval(() => {
+    tries += 1;
+    renderOnce();
+    if (document.querySelector(".carbcalc-row") || tries >= maxTries) {
+      clearInterval(timer);
+    }
+  }, 500);
 })();
